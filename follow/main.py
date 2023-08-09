@@ -8,16 +8,29 @@ import signal
 import cv2
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--host', type=str, default="http://10.6.9.97:4747/video", help='MJPEG stream host address')
+parser.add_argument('--ipcam', type=str, default="http://10.6.9.97:4747/video", help='MJPEG stream host address (droidcam server)')
+parser.add_argument('--host', type=str, default="ws://roland:1111/ws", help='Roland websocket address')
 
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CENTER = CAMERA_WIDTH // 2
 SPEED = 0.8
 
+global ws
+
 def cleanup(*args):
+    stop()
+    ws.close()
     print("quit")
     exit(0)
+
+def stop():
+    ws.send('s')
+    ws.recv()
+
+def move(left, right):
+    ws.send(f'm {left} {right}')
+    ws.recv()
 
 signal.signal(signal.SIGINT, cleanup)
 
@@ -100,15 +113,16 @@ def get_position(positions, frame):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-
     model_path = 'data/model.tflite'
-    cap = VideoCapture(args.host)
-    cv2.namedWindow('image')
 
+    ws = create_connection(args.host)
+
+    cap = VideoCapture(args.ipcam)
     cap.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
     cap.cap.set(cv2.CAP_PROP_FPS, 20)
 
+    cv2.namedWindow('image')
     interpreter = load_model(model_path)
     input_details = interpreter.get_input_details()
 
@@ -133,10 +147,17 @@ if __name__ == "__main__":
 
         positions, conf = process_image(interpreter, image, input_index)
 
+        key = cv2.waitKey(10)
+        # why does it always return -1
+        # print(key)
+        # if key == ord(' '):
+        #     enabled = not enabled
+        # if key == ord('q') or key == 27:  # esc
+        #     break
+
         if conf < 0.1:
             cv2.imshow('image', frame)
-            cv2.waitKey(1)
-            print('Not confident enough')
+            # print('Not confident enough')
             continue
 
         (x, y) = get_position(positions, frame)
@@ -145,9 +166,8 @@ if __name__ == "__main__":
         speed_right = (1 - (x / CAMERA_WIDTH)) * SPEED
 
         print(f'{x=} {y=} -> ({speed_left},{speed_right})')
-        
-        key = cv2.waitKey(1)
-        if key == 27:  # esc
-            break
+
+        # move(speed_left, speed_right)
 
     cap.release()
+    cleanup()

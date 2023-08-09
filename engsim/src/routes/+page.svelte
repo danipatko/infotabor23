@@ -76,21 +76,13 @@
     }
 
     function send() {
-        let right = engine.nVelocity,
-            left = engine.nVelocity;
+        const x = (inputs.axisX + 1) / 2;
+        const left = clamp(0, 1, x * engine.nVelocity * 2),
+            right = clamp(0, 1, (1 - x) * engine.nVelocity * 2);
 
-        if (inputs.axisX > 0) right *= 1 - inputs.axisX;
-        else left *= 1 + inputs.axisX;
-
-        if (webSocket?.readyState == WebSocket.OPEN) {
-            // console.log(`m ${Math.floor(left * 100)} ${Math.floor(right * 100)}`);
-            // webSocket.send(`m ${Math.floor(left * 100)} ${Math.floor(right * 100)}`);
-
-            // console.log(`${id++} m ${left} ${right}`);
-            // webSocket.send(`${id++} m ${left} ${right}`);
-
-            console.log(`m ${left} ${right}`);
-            webSocket.send(`m ${left} ${right}`);
+        if (webSocket?.readyState === WebSocket.OPEN) {
+            console.log(left.toFixed(2), right.toFixed(2));
+            webSocket.send(`${id++} m ${left} ${right}`);
         }
     }
 </script>

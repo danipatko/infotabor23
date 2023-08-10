@@ -14,9 +14,13 @@ parser.add_argument('--host', type=str, default="ws://roland:1111/ws", help='Rol
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CENTER = CAMERA_WIDTH // 2
-SPEED = 0.8
+SPEED = 0.6
+# number of frames to drop tracker
+SANITYCHECK = 10
 
 global ws
+
+msgid = 1
 
 def cleanup(*args):
     stop()
@@ -25,14 +29,19 @@ def cleanup(*args):
     exit(0)
 
 def stop():
-    ws.send('s')
-    ws.recv()
+    global msgid
+    ws.send(f'{msgid} s')
+    # print(f'{msgid} s')
+    msgid += 1
 
 def move(left, right):
-    ws.send(f'm {left} {right}')
-    ws.recv()
+    global msgid
+    ws.send(f'{msgid} m {left} {right}')
+    # print(f'{msgid} m {left} {right}')
+    msgid += 1
 
 signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGTERM, cleanup) 
 
 def sigmoid(x):
     return 1.0 / (1.0 + 1.0 / np.exp(x))
@@ -59,7 +68,6 @@ def process_image(interpreter, image, input_index):
     points = []
     total_row, total_col, total_points = output_data.shape
 
-    # totally 17 points, only legs are relevant: 9 -> 17
     for k in range(0, total_points):
         max_score = output_data[0][0][k]
         max_row = 0
@@ -86,13 +94,15 @@ def process_image(interpreter, image, input_index):
         positions.append((pos_x, pos_y, offset_x, offset_y))
         confidence += sigmoid(output_data[pos_y][pos_x][idx])
 
-    confidence = confidence / len(points)
+    confidence /= len(points)
     return positions, confidence
 
-
-def get_position(positions, frame):
+# avg of keypoints
+def detect_position(positions, frame):
     sum_x = 0
     sum_y = 0
+    offset = 5
+    (sx, sy, ex, ey) = (CAMERA_WIDTH, CAMERA_HEIGHT, -CAMERA_WIDTH, -CAMERA_HEIGHT)
 
     for pos in positions:
         pos_x, pos_y, offset_x, offset_y = pos
@@ -101,28 +111,44 @@ def get_position(positions, frame):
         x = int(pos_x / 8 * CAMERA_WIDTH + offset_x)
         y = int(pos_y / 8 * CAMERA_HEIGHT + offset_y)
 
+        # avg
         sum_x += x
         sum_y += y
+
+        # min/max => bounding box
+        sx = min(sx, x)
+        sy = min(sy, y)
+        ex = max(ex, x)
+        ey = max(ey, y)
     
     res = (sum_x // len(positions), sum_y // len(positions))
-    
+    bbox = (sx - offset, sy - offset, ex - sx + (2 * offset), ey - sy + (2 * offset))
+
     cv2.drawMarker(frame, res, (255, 0, 0), 8, 20, 4)
+    cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]), (0, 255, 0), 2)
+
     cv2.imshow('image', frame)
 
-    return res
+    return res, bbox
+
 
 if __name__ == "__main__":
     args = parser.parse_args()
     model_path = 'data/model.tflite'
 
     ws = create_connection(args.host)
+    msgid = 1
 
+    tracker = cv2.TrackerKCF_create()
+    being_tracked = False
+    
     cap = VideoCapture(args.ipcam)
     cap.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
     cap.cap.set(cv2.CAP_PROP_FPS, 20)
 
     cv2.namedWindow('image')
+
     interpreter = load_model(model_path)
     input_details = interpreter.get_input_details()
 
@@ -130,44 +156,62 @@ if __name__ == "__main__":
     input_shape = input_details[0]['shape']
     height = input_shape[1]
     width = input_shape[2]
-
-    # Get input index
     input_index = input_details[0]['index']
 
+    index = 0
     # Process Stream
     while True:
+        key = cv2.waitKey(10)
         frame = cap.read()
-
+ 
         # cv2.imshow('image', frame)
         # key = cv2.waitKey(1)
         # continue
 
-        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        image = image.resize((width, height))
+        if not being_tracked:
+            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            image = image.resize((width, height))
+            positions, conf = process_image(interpreter, image, input_index)
 
-        positions, conf = process_image(interpreter, image, input_index)
+            if conf < 0.1:
+                cv2.imshow('image', frame)
+                stop()
+                continue
 
-        key = cv2.waitKey(10)
-        # why does it always return -1
-        # print(key)
-        # if key == ord(' '):
-        #     enabled = not enabled
-        # if key == ord('q') or key == 27:  # esc
-        #     break
+            # detect human & initialize bounding box 
+            (x, _), bbox = detect_position(positions, frame)
+            
+            # check if oversize
+            if bbox[2] / CAMERA_WIDTH > 0.33:
+                cv2.imshow('image', frame)
+                stop()
+                continue
 
-        if conf < 0.1:
-            cv2.imshow('image', frame)
-            # print('Not confident enough')
-            continue
+            # init tracker
+            tracker = cv2.TrackerKCF_create()
+            ok = tracker.init(frame, bbox)
+            being_tracked = True
 
-        (x, y) = get_position(positions, frame)
+        else:
+            ok, bbox = tracker.update(frame)
+            x = (bbox[0] * 2 + bbox[2]) / 2
+
+            if not ok or index > SANITYCHECK:
+                being_tracked = False
+                index = 0
+                continue
+
+            index += 1
+            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]), (0, 255, 0), 2)
+
+        cv2.imshow('image', frame)
 
         speed_left = (x / CAMERA_WIDTH) * SPEED
         speed_right = (1 - (x / CAMERA_WIDTH)) * SPEED
 
-        print(f'{x=} {y=} -> ({speed_left},{speed_right})')
+        print(f'{x=} -> ({speed_left},{speed_right})')
 
-        # move(speed_left, speed_right)
+        move(speed_left, speed_right)
 
     cap.release()
     cleanup()

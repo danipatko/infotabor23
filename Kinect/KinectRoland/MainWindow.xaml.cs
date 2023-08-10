@@ -1,10 +1,11 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Windows;
 using Microsoft.Kinect;
 using System.Net.WebSockets;
-using System.Threading;
-using System.Text;
+using System.Reactive.Linq;
+using System.Threading.Tasks.Dataflow;
 
 namespace KinectRoland
 {
@@ -13,9 +14,16 @@ namespace KinectRoland
     /// </summary>
     public partial class MainWindow : Window
     {
+        private ActionBlock<string> workerBlock;
+
         public MainWindow()
         {
             InitializeComponent();
+            workerBlock = new ActionBlock<string>(async msg =>
+            {
+                if (socket != null && socket.State == WebSocketState.Open)
+                    await socket.SendAsync(new ArraySegment<byte>(Encoding.ASCII.GetBytes($"{msgid++} {msg}")), WebSocketMessageType.Text, true, default);
+            });
         }
 
         private KinectSensor sensor;
@@ -23,17 +31,25 @@ namespace KinectRoland
         private Gestures gestures;
         private ClientWebSocket socket;
         private int msgid = 1;
+        private bool enabled = true;
 
         private async void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (sensor != null) sensor.Stop();
-            if(socket.State == WebSocketState.Open)
-            {
-                await socket.SendAsync(new ArraySegment<byte>(Encoding.ASCII.GetBytes($"{msgid++} s")), WebSocketMessageType.Text, false, default);
-                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "quit", default);
-            }
+            sensor?.Stop();
+            Stop();
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "quit", default);
         }
-        
+
+        private async void Stop()
+        {
+            workerBlock.Post("s");
+            
+            await Dispatcher.BeginInvoke(new Action(() => {
+                PositionText.Text = "STOPPED (jump to start)";
+            }));
+        }
+
+        private void Move(float left, float right) => workerBlock.Post($"m {left:0.000} {right:0.000}");
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             // try to connect ws
@@ -61,8 +77,43 @@ namespace KinectRoland
             }
             if (sensor == null) throw new Exception("Unable to find kinect sensor!");
 
-            gestures = new Gestures();
-            gestures.OnMoved += HandleMovement;
+            gestures = new Gestures(sensor);
+            gestures.All.Subscribe(async a =>
+            {
+                if (!enabled) return;
+                if(double.IsNaN(a.lha))
+                {
+                    Stop();
+                    return;
+                }
+
+                // normalize speed & snap to 0
+                float speed = (float)a.lha / 90;
+                speed = Math.Abs(speed) < 0.2 ? 0 : speed;
+
+                // steering
+                float handlength = 0.4F;
+                float x = (a.rhp.x / handlength + 1) / 2;
+
+                float left = x * speed;
+                float right = (1 - x) * speed;
+
+                Move(left, right);
+
+                // calculate left/right
+                await Dispatcher.BeginInvoke(new Action(() => {
+                    PositionText.Text = $"x: {a.rhp.x} => {x}\nleft: {left:0.00}\nright: {right:0.00}\nsend: '{msgid++} m {left:0.000} {right:0.000}'";
+                }));
+            });
+
+            gestures.Tracked.Subscribe(tracked => {
+                if(!tracked) Stop();
+            });
+
+            gestures.Jumped.Subscribe(jumped => {
+                if (jumped) enabled = !enabled;
+                if (!enabled) Stop();
+            });
 
             // start image stream
             display = new Display(sensor);
@@ -71,7 +122,6 @@ namespace KinectRoland
             sensor.SkeletonStream.Enable();
             sensor.SkeletonStream.EnableTrackingInNearRange = true;
 
-            sensor.SkeletonFrameReady += gestures.OnFrameReady;
             sensor.SkeletonFrameReady += display.OnFrameReady;
 
             try
@@ -82,34 +132,6 @@ namespace KinectRoland
             {
                 sensor = null;
             }
-        }
-
-        private async void HandleMovement(object sender, Gestures.MovementEventArgs e)
-        {
-            // stop
-            if(!e.Tracked || double.IsNaN(e.LeftHandAngle))
-            { 
-                await socket.SendAsync(new ArraySegment<byte>(Encoding.ASCII.GetBytes($"{msgid++} s")), WebSocketMessageType.Text, true, default);
-                PositionText.Text = "STOPPED";
-                return;
-            }
-
-            // normalize speed & snap to 0
-            float speed = (float)e.LeftHandAngle / 90;
-            speed = Math.Abs(speed) < 0.2 ? 0 : speed;
-
-            // steering
-            float handlength = 0.4F;
-            float x = (e.RightHandPosition.x / handlength + 1) / 2;
-
-            float left = x * speed;
-            float right = (1 - x) * speed;
-
-            // PositionText.Text = $"left: {(int)e.LeftHandAngle}\nright: {(int)e.RightHandAngle}\nposition\nleft:{ToString(e.LeftHandPosition)}\nright:{ToString(e.RightHandPosition)}";
-            PositionText.Text = $"x: {e.RightHandPosition.x} => {x}\nleft: {left:0.00}\nright: {right:0.00}\nsend: '{msgid++} m {left:0.000} {right:0.000}'";
-
-            var message = new ArraySegment<byte>(Encoding.ASCII.GetBytes($"{msgid++} m {left:0.000} {right:0.000}"));
-            await socket.SendAsync(message, WebSocketMessageType.Text, true, default);
         }
     }
 }

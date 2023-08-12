@@ -2,10 +2,6 @@
 using System.Linq;
 using Microsoft.Kinect;
 using System.Reactive.Linq;
-using System.Windows.Forms;
-using System.Reactive.Subjects;
-using System.Reactive.Disposables;
-using static KinectRoland.Gestures;
 
 namespace KinectRoland
 {
@@ -19,7 +15,6 @@ namespace KinectRoland
 
         // max distance between right hand and right shoulder
         private const float IdleHandOffset = 0.05f;
-
 
         public IObservable<bool> Tracked;
         public IObservable<bool> Jumped;
@@ -56,11 +51,11 @@ namespace KinectRoland
             });
 
             Tracked = (from sd in skeletons
-                      let tracked = sd.SingleOrDefault(s => s.TrackingState == SkeletonTrackingState.Tracked)
+                      let tracked = sd.FirstOrDefault(s => s.TrackingState == SkeletonTrackingState.Tracked)
                       select tracked != null).DistinctUntilChanged();
 
             var joints = from sd in skeletons
-                         let tracked = sd.SingleOrDefault(s => s.TrackingState == SkeletonTrackingState.Tracked)
+                         let tracked = sd.FirstOrDefault(s => s.TrackingState == SkeletonTrackingState.Tracked)
                          where tracked != null
                          select tracked.Joints;
 
@@ -109,95 +104,5 @@ namespace KinectRoland
             return Math.Abs(a.Position.X - b.Position.X) + Math.Abs(a.Position.Y - b.Position.Y);
         }
 
-        //private (float x, float y) BodyPosition(Skeleton skeleton)
-        //{
-        //    float depth = -(skeleton.Position.Z / 3f - BodyCenter);
-        //    (float x, float y) pos = (skeleton.Position.X, depth);
-
-        //    // snap body to (0, 0) if within offset
-        //    if (-BodyOffsetX < skeleton.Position.X && skeleton.Position.X < BodyOffsetX) 
-        //        pos = (0, pos.y); // x to 0
-        //    if (-BodyOffsetY < depth && depth < BodyOffsetY) 
-        //        pos = (pos.x, 0); // y to 0
-
-        //    return pos;
-        //}
-
-
-
-        // event stuff
-        //public class MovementEventArgs : EventArgs
-        //{
-        //    public bool Tracked { get; set; }
-        //    public double LeftHandAngle { get; set; }
-        //    public double RightHandAngle { get; set; }
-        //    public (float x, float y) LeftHandPosition { get; set; }
-        //    public (float x, float y) RightHandPosition { get; set; }
-        //}
-
-        //public event EventHandler<MovementEventArgs> OnMoved;
-        //protected virtual void Moved(MovementEventArgs e)
-        //{
-        //    OnMoved?.Invoke(this, e);
-        //}
-
-        //public void OnFrameReady(object sender, SkeletonFrameReadyEventArgs e)
-        //{
-        //    Skeleton[] skeletons = new Skeleton[0];
-
-        //    using (SkeletonFrame skeletonFrame = e.OpenSkeletonFrame())
-        //    {
-        //        if (skeletonFrame != null)
-        //        {
-        //            skeletons = new Skeleton[skeletonFrame.SkeletonArrayLength];
-        //            skeletonFrame.CopySkeletonDataTo(skeletons);
-        //        }
-        //    }
-
-        //    skeleton = new Skeleton();
-        //    foreach (Skeleton s in skeletons)
-        //    {
-        //        if (s.TrackingState == SkeletonTrackingState.Tracked)
-        //        {
-        //            skeleton = s;
-        //            break;
-        //        }
-        //    }
-
-        //    if (skeleton.TrackingState != SkeletonTrackingState.Tracked)
-        //    {
-        //        if (Tracked)
-        //        {
-        //            Moved(new MovementEventArgs
-        //            {
-        //                LeftHandAngle = double.NaN,
-        //                RightHandAngle = double.NaN,
-        //                LeftHandPosition = (0, 0),
-        //                RightHandPosition = (0, 0),
-        //                Tracked = false
-        //            });
-        //        }
-
-        //        Tracked = false;
-        //        return;
-        //    }
-
-        //    Tracked = true;
-
-        //    double leftHandAngle = GetHandAngle(Side.Left),
-        //        rightHandAngle = GetHandAngle(Side.Right);
-
-        //    (float x, float y) leftHandPos = GetHandElbowRelative(Side.Left),
-        //        rightHandPos = GetHandElbowRelative(Side.Right);
-
-        //    Moved(new MovementEventArgs
-        //    {
-        //        LeftHandAngle = leftHandAngle,
-        //        RightHandAngle = rightHandAngle,
-        //        LeftHandPosition = leftHandPos,
-        //        RightHandPosition = rightHandPos,
-        //        Tracked = true
-        //    });
-        //}
     }
 }

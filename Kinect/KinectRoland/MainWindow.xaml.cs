@@ -88,7 +88,7 @@ namespace KinectRoland
                 }
 
                 // normalize speed & snap to 0
-                float speed = (float)a.lha / 90;
+                float speed = (float)a.lha / 60;
                 speed = Math.Abs(speed) < 0.2 ? 0 : speed;
 
                 // steering

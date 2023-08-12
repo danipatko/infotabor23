@@ -31,7 +31,7 @@ namespace KinectRoland
         private Gestures gestures;
         private ClientWebSocket socket;
         private int msgid = 1;
-        private bool enabled = true;
+        private bool enabled = false;
 
         private async void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {

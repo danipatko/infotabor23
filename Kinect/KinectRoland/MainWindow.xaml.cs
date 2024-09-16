@@ -6,6 +6,8 @@ using Microsoft.Kinect;
 using System.Net.WebSockets;
 using System.Reactive.Linq;
 using System.Threading.Tasks.Dataflow;
+using System.Threading;
+using System.Diagnostics;
 
 namespace KinectRoland
 {
@@ -37,7 +39,14 @@ namespace KinectRoland
         {
             sensor?.Stop();
             Stop();
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "quit", default);
+            try
+            {
+                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "quit", default);
+            }
+            catch (Exception)
+            {
+                Debug.WriteLine("Failed to close socket gracefully");
+            }
         }
 
         private async void Stop()
@@ -52,15 +61,16 @@ namespace KinectRoland
         private void Move(float left, float right) => workerBlock.Post($"m {left:0.000} {right:0.000}");
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            string[] args = Environment.GetCommandLineArgs();
             // try to connect ws
             socket = new ClientWebSocket();
-            Uri url = new Uri("ws://roland:1111/ws");
+            Uri url = new Uri(args.Length > 1 ? args[1] : "ws://10.1.201.112:1111/ws");
 
             try
             {
-                await socket.ConnectAsync(url, default);
+                await socket.ConnectAsync(url, CancellationToken.None);
             }
-            catch (WebSocketException)
+            catch (Exception)
             {
                 MessageBox.Show($"Failed to connect to '{url}'", "cope", MessageBoxButton.OK, MessageBoxImage.Error);
                 Environment.Exit(1);
@@ -75,7 +85,12 @@ namespace KinectRoland
                     break;
                 }
             }
-            if (sensor == null) throw new Exception("Unable to find kinect sensor!");
+
+            if (sensor == null)
+            {
+                MessageBox.Show($"Failed to find Kinect sensor", "cope", MessageBoxButton.OK, MessageBoxImage.Error);
+                Environment.Exit(1);
+            }
 
             gestures = new Gestures(sensor);
             gestures.All.Subscribe(async a =>

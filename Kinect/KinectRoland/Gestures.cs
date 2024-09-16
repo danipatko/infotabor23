@@ -88,7 +88,7 @@ namespace KinectRoland
             from joint in joints
             let hand = joint[side == Side.Right ? JointType.HandRight : JointType.HandLeft]
             let elbow = joint[side == Side.Right ? JointType.ElbowRight : JointType.ElbowLeft]
-            select (hand.Position.X - elbow.Position.X, hand.Position.Y - elbow.Position.Y);
+            select (hand.Position.X - elbow.Position.X, hand.Position.Y - elbow.Position.Y);    
 
         private IObservable<double> GetHandAngle(IObservable<JointCollection> joints, Side side = Side.Right) =>
             from joint in joints
